@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  anythingllm:
+    image: mintplexlabs/anythingllm:latest
+    container_name: anythingllm
+    hostname: anythingllm
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - anythingllm_storage:/app/server/storage
+      - anythingllm_logs:/app/server/logs
+    environment:
+      - TZ=America/Los_Angeles
+      - STORAGE_DIR=/app/server/storage
+      - SIMPLE_SSO_ENABLED=true
+      - DISABLE_TELEMETRY=true
+      - JWT_SECRET=your-jwt-secret-key-here
+    networks:
+      - sso_network
+
+  sso-bridge:
+    image: sso-bridge:latest
+    container_name: sso-bridge
+    hostname: sso-bridge
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      # System Configuration
+      - NODE_ENV=production
+      - TZ=America/Los_Angeles
+      
+      # SSO Bridge Configuration
+      - BRIDGE_URL=https://sso-bridge.example.com
+      
+      # AnythingLLM Configuration
+      - ANYTHINGLLM_URL=https://anythingllm.example.com
+      - ANYTHINGLLM_INTERNAL_URL=http://192.168.4.7:3001
+      - ANYTHINGLLM_API_KEY=your-api-key-here
+      
+      # Keycloak Configuration
+      - KEYCLOAK_URL=https://keycloak.example.com
+      - KEYCLOAK_REALM=master
+      - KEYCLOAK_CLIENT_ID=anythingllm
+      - KEYCLOAK_CLIENT_SECRET=your-client-secret-here
+    networks:
+      - sso_network
+    depends_on:
+      - anythingllm
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  anythingllm_storage:
+  anythingllm_logs:
+
+networks:
+  sso_network:
+    driver: bridge

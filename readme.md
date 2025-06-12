@@ -1,21 +1,21 @@
-# Keycloak AnythingLLM SSO Bridge
+# SSO-Bridge for AnythingLLM and Keycloak
 
 A lightweight Node.js service that enables Single Sign-On (SSO) integration between Keycloak and AnythingLLM, supporting Active Directory federated users.
 
-## 🔧 Architecture
+## How It Works
 
 This bridge implements an OAuth2/OpenID Connect flow:
 
-1. **User** clicks login → **SSO Bridge** 
-2. **SSO Bridge** redirects to **Keycloak**
-3. **Keycloak** authenticates against **Active Directory**
-4. **Keycloak** returns to **SSO Bridge** with auth code
-5. **SSO Bridge** exchanges code for user info
-6. **SSO Bridge** creates/finds user in **AnythingLLM**
-7. **SSO Bridge** generates AnythingLLM auth token
-8. **User** is logged into **AnythingLLM**
+1. User clicks login → SSO Bridge
+2. SSO Bridge redirects to Keycloak
+3. Keycloak authenticates against Active Directory
+4. Keycloak returns to SSO Bridge with auth code
+5. SSO Bridge exchanges code for user info
+6. SSO Bridge creates/finds user in AnythingLLM
+7. SSO Bridge generates AnythingLLM auth token
+8. User is logged into AnythingLLM
 
-## 🚀 Features
+## Features
 
 - ✅ OAuth2/OpenID Connect compliant
 - ✅ Automatic user provisioning in AnythingLLM
@@ -25,41 +25,56 @@ This bridge implements an OAuth2/OpenID Connect flow:
 - ✅ Health check endpoints
 - ✅ Active Directory federation through Keycloak
 
-## 📋 Prerequisites
+## Prerequisites
 
-- **Keycloak** server with configured realm
-- **AnythingLLM** instance with Simple SSO enabled
-- **Docker** and **Docker Compose** (for containerized deployment)
-- **Active Directory** (optional, for user federation)
+- Keycloak server with configured realm
+- AnythingLLM instance with Simple SSO enabled
+- Docker and Docker Compose (for containerized deployment)
+- Nginx Proxy Manager (for reverse proxy routing)
+- Active Directory (optional, for user federation)
 
-## 🛠️ Installation
+## Quick Start
 
-### Method 1: Docker Compose (Recommended)
+### 1. Clone the repository
 
-1. **Clone the repository:**
 ```bash
-git clone https://github.com/yourusername/keycloak-anythingllm-sso-bridge.git
-cd keycloak-anythingllm-sso-bridge
+git clone https://github.com/makawuhu/SSO-Bridge.git
+cd SSO-Bridge
 ```
 
-2. **Configure environment variables:**
+### 2. Configure environment variables
+
 ```bash
 cp .env.example .env
 # Edit .env with your configuration
 ```
 
-3. **Deploy with Docker Compose:**
+### 3. Deploy with Docker Compose
+
 ```bash
 docker-compose up -d
 ```
 
-### Method 2: Portainer Stack
+## Configuration
 
-Deploy using the provided `docker-compose.yml` in Portainer:
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `KEYCLOAK_URL` | Keycloak server URL | `https://keycloak.example.com` |
+| `KEYCLOAK_REALM` | Keycloak realm name | `master` |
+| `KEYCLOAK_CLIENT_ID` | OAuth client ID | `anythingllm` |
+| `KEYCLOAK_CLIENT_SECRET` | OAuth client secret | `your-secret-here` |
+| `ANYTHINGLLM_URL` | External AnythingLLM URL | `https://anythingllm.example.com` |
+| `ANYTHINGLLM_INTERNAL_URL` | Internal AnythingLLM URL for API calls | `http://192.168.4.7:3001` |
+| `ANYTHINGLLM_API_KEY` | AnythingLLM API key | `your-api-key` |
+| `BRIDGE_URL` | SSO bridge external URL | `https://sso-bridge.example.com` |
+| `PORT` | Bridge service port | `3000` |
+
+### Docker Compose Example
 
 ```yaml
 version: '3.8'
-
 services:
   anythingllm:
     image: mintplexlabs/anythingllm:latest
@@ -79,7 +94,7 @@ services:
       - JWT_SECRET=your-jwt-secret-key-here
     networks:
       - sso_network
-      
+
   sso-bridge:
     image: sso-bridge:latest
     container_name: sso-bridge
@@ -95,7 +110,7 @@ services:
       - KEYCLOAK_CLIENT_ID=anythingllm
       - KEYCLOAK_CLIENT_SECRET=your-client-secret
       - ANYTHINGLLM_URL=https://your-anythingllm-url.com
-      - ANYTHINGLLM_INTERNAL_URL=http://anythingllm:3001
+      - ANYTHINGLLM_INTERNAL_URL=http://192.168.4.7:3001
       - ANYTHINGLLM_API_KEY=your-api-key
       - BRIDGE_URL=https://your-bridge-url.com
     networks:
@@ -117,65 +132,99 @@ networks:
     driver: bridge
 ```
 
-## ⚙️ Configuration
+## Keycloak Configuration
 
-### Environment Variables
+### 1. Create Client
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `KEYCLOAK_URL` | Keycloak server URL | `https://keycloak.example.com` |
-| `KEYCLOAK_REALM` | Keycloak realm name | `master` |
-| `KEYCLOAK_CLIENT_ID` | OAuth client ID | `anythingllm` |
-| `KEYCLOAK_CLIENT_SECRET` | OAuth client secret | `your-secret-here` |
-| `ANYTHINGLLM_URL` | External AnythingLLM URL | `https://anythingllm.example.com` |
-| `ANYTHINGLLM_INTERNAL_URL` | Internal AnythingLLM URL | `http://anythingllm:3001` |
-| `ANYTHINGLLM_API_KEY` | AnythingLLM API key | `your-api-key` |
-| `BRIDGE_URL` | SSO bridge external URL | `https://bridge.example.com` |
-| `PORT` | Bridge service port | `3000` |
+Create a new client in your Keycloak realm:
 
-### Keycloak Client Configuration
+- **Client ID**: `anythingllm`
+- **Client Protocol**: `openid-connect`
+- **Access Type**: `confidential`
 
-1. **Create a new client** in your Keycloak realm:
-   - Client ID: `anythingllm`
-   - Client Protocol: `openid-connect`
-   - Access Type: `confidential`
+### 2. Configure Redirect URIs
 
-2. **Configure Valid Redirect URIs:**
-   ```
-   https://your-bridge-url.com/sso/callback
-   ```
+Set **Valid Redirect URIs** to:
+```
+https://your-anythingllm-url.com/sso/callback
+```
 
-3. **Set Client Scopes:**
-   - `openid` (required)
-   - `profile` (required)
-   - `email` (required)
+**Important**: Use your AnythingLLM domain, not the bridge domain, for the callback URL.
 
-### AnythingLLM Configuration
+### 3. Set Client Scopes
+
+Enable these scopes:
+- `openid` (required)
+- `profile` (required)
+- `email` (required)
+
+### 4. Web Origins
+
+Add both domains to **Web origins**:
+```
+https://your-anythingllm-url.com
+https://your-bridge-url.com
+```
+
+## Nginx Proxy Manager Configuration
+
+### 1. Create Proxy Hosts
+
+Create separate proxy hosts for:
+- **AnythingLLM**: `anythingllm.example.com` → `192.168.4.7:3001`
+- **SSO-Bridge**: `sso-bridge.example.com` → `192.168.4.7:3002`
+
+### 2. Custom Nginx Configuration
+
+Add this to your **AnythingLLM proxy host** custom nginx configuration:
+
+```nginx
+location /sso/ {
+    proxy_pass http://192.168.4.7:3002/sso/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache_bypass $http_upgrade;
+}
+
+location /sso/simple {
+    proxy_pass http://192.168.4.7:3001/sso/simple;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache_bypass $http_upgrade;
+}
+```
+
+**Key Points**:
+- `/sso/` routes (login, callback) go to SSO-Bridge on port 3002
+- `/sso/simple` route goes to AnythingLLM on port 3001
+- Use your actual server IP instead of `192.168.4.7`
+
+## AnythingLLM Configuration
 
 1. **Enable Simple SSO** in AnythingLLM settings
 2. **Generate API Key** for the bridge service
 3. **Set JWT Secret** for token validation
 
-## 🔗 Usage
+## Usage
 
-### Login Flow
+### Initiating SSO Login
 
 Users can initiate SSO login by visiting:
 ```
 https://your-bridge-url.com/sso/login
 ```
 
-### Integration with AnythingLLM
-
-Replace the standard login button in AnythingLLM with a link to the SSO bridge:
-
-```html
-<a href="https://your-bridge-url.com/sso/login" class="sso-login-btn">
-  Login with SSO
-</a>
-```
-
-## 🔍 Monitoring
+Or configure AnythingLLM to redirect to this URL for authentication.
 
 ### Health Check
 
@@ -194,67 +243,85 @@ Response:
 }
 ```
 
-### Logs
+## Monitoring
 
 Monitor bridge logs for authentication events:
 ```bash
 docker logs sso-bridge -f
 ```
 
-## 🛡️ Security Considerations
+## Security Features
 
 - **State Parameter**: CSRF protection with cryptographically secure random states
 - **Token Expiration**: Optimized flow to minimize token expiration issues
 - **Environment Variables**: Sensitive configuration moved to environment variables
 - **Internal Communication**: Uses container networking for secure internal API calls
 
-## 🧩 Active Directory Integration
+## Active Directory Integration
 
 This bridge works seamlessly with Keycloak's Active Directory federation:
 
-1. **Configure AD Federation** in Keycloak
-2. **Map AD Groups** to Keycloak roles (optional)
-3. **Users authenticate** against AD through Keycloak
-4. **Bridge provisions** users in AnythingLLM automatically
-
-## 📊 Flow Diagram
+1. Configure AD Federation in Keycloak
+2. Map AD Groups to Keycloak roles (optional)
+3. Users authenticate against AD through Keycloak
+4. Bridge provisions users in AnythingLLM automatically
 
 ```
-┌──────────┐    ┌─────────────┐    ┌──────────┐    ┌─────────────┐
+┌──────────┐ ┌─────────────┐ ┌──────────┐ ┌─────────────┐
 │   User   │───▶│ SSO Bridge  │───▶│ Keycloak │───▶│ Active Dir  │
-└──────────┘    └─────────────┘    └──────────┘    └─────────────┘
-      ▲                │                    │
-      │                ▼                    │
-      │         ┌─────────────┐            │
-      └─────────│ AnythingLLM │◀───────────┘
-                └─────────────┘
+└──────────┘ └─────────────┘ └──────────┘ └─────────────┘
+      ▲              │                          │
+      │              ▼                          │
+      │      ┌─────────────┐                    │
+      └──────│ AnythingLLM │◀───────────────────┘
+             └─────────────┘
 ```
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
-**Token Expiration**
-- Ensure `ANYTHINGLLM_INTERNAL_URL` uses container networking
+#### Token Expiration
+- Ensure `ANYTHINGLLM_INTERNAL_URL` uses direct IP/container networking
 - Check that AnythingLLM is accessible from the bridge container
 
-**Authentication Fails**
+#### Authentication Fails
 - Verify Keycloak client configuration
-- Check redirect URI matches exactly
+- Check redirect URI matches exactly: `https://your-anythingllm-url.com/sso/callback`
 - Validate client secret
 
-**User Creation Errors**
+#### User Creation Errors
 - Confirm AnythingLLM API key is valid
 - Check API key permissions for user management
 
-### Debug Mode
+#### "Cannot GET /sso/simple" Error
+- Verify NPM custom nginx configuration is applied
+- Check that `/sso/simple` routes to AnythingLLM (port 3001)
+
+#### "Invalid parameter: redirect_uri" Error
+- Ensure Keycloak client has correct redirect URI
+- Check that callback URL uses AnythingLLM domain, not bridge domain
+
+### Debug Logging
 
 Enable debug logging:
 ```bash
 docker run -e NODE_ENV=development sso-bridge:latest
 ```
 
-## 🤝 Contributing
+### Network Connectivity
+
+Test connectivity between services:
+```bash
+# From SSO-Bridge container
+curl http://192.168.4.7:3001/health
+
+# From external
+curl https://anythingllm.example.com/health
+curl https://sso-bridge.example.com/health
+```
+
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -262,22 +329,21 @@ docker run -e NODE_ENV=development sso-bridge:latest
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📜 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [AnythingLLM](https://github.com/Mintplex-Labs/anything-llm) for the excellent LLM platform
 - [Keycloak](https://www.keycloak.org/) for robust identity management
 - [Express.js](https://expressjs.com/) for the web framework
 
-## 📞 Support
+## Support
 
-- 🐛 **Issues**: [GitHub Issues](https://github.com/yourusername/keycloak-anythingllm-sso-bridge/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/yourusername/keycloak-anythingllm-sso-bridge/discussions)
-- 📧 **Email**: your-email@example.com
+- 🐛 Issues: [GitHub Issues](https://github.com/makawuhu/SSO-Bridge/issues)
+- 💬 Discussions: [GitHub Discussions](https://github.com/makawuhu/SSO-Bridge/discussions)
 
 ---
 
-**Made with ❤️ for the AnythingLLM community**
+Made with ❤️ for the AnythingLLM community

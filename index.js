@@ -5,16 +5,18 @@ const crypto = require('crypto');
 const app = express();
 app.use(express.json());
 
+// FIXED: Now properly supports environment variables with fallbacks
 const CONFIG = {
-  KEYCLOAK_URL: 'https://keycloak.makawuhu.com',
-  KEYCLOAK_REALM: 'master',
-  KEYCLOAK_CLIENT_ID: 'anythingllm',
-  KEYCLOAK_CLIENT_SECRET: 'ccFFHCHRYdMjMrNYyuMi1F6DbDzwQxQE',
-  ANYTHINGLLM_URL: 'https://anythingllm.makawuhu.com',
-  ANYTHINGLLM_INTERNAL_URL: 'http://192.168.4.7:3001', // Use internal IP for SSO
-  ANYTHINGLLM_API_KEY: '1CC3Y73-09X42BB-JDX1QWW-JST30WD',
-  BRIDGE_URL: 'https://anythingllm.makawuhu.com',
-  PORT: 3000
+  KEYCLOAK_URL: process.env.KEYCLOAK_URL || 'https://keycloak.makawuhu.com',
+  KEYCLOAK_REALM: process.env.KEYCLOAK_REALM || 'master',
+  KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID || 'anythingllm',
+  KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET || 'ccFFHCHRYdMjMrNYyuMi1F6DbDzwQxQE',
+  ANYTHINGLLM_URL: process.env.ANYTHINGLLM_URL || 'https://anythingllm.makawuhu.com',
+  ANYTHINGLLM_INTERNAL_URL: process.env.ANYTHINGLLM_INTERNAL_URL || 'http://192.168.4.7:3001',
+  ANYTHINGLLM_API_KEY: process.env.ANYTHINGLLM_API_KEY || '1CC3Y73-09X42BB-JDX1QWW-JST30WD',
+  // FIXED: Bridge URL should be the SSO bridge domain, not AnythingLLM domain
+  BRIDGE_URL: process.env.BRIDGE_URL || 'https://sso-bridge.makawuhu.com',
+  PORT: process.env.PORT || 3000
 };
 
 const authStates = new Map();
@@ -25,8 +27,9 @@ function generateState() {
 
 async function createOrGetUser(keycloakUser) {
   try {
+    // FIXED: Use internal URL for API calls (better performance and reliability)
     const usersResponse = await axios.get(
-      `${CONFIG.ANYTHINGLLM_URL}/api/v1/admin/users`,
+      `${CONFIG.ANYTHINGLLM_INTERNAL_URL}/api/v1/admin/users`,
       {
         headers: {
           'Authorization': `Bearer ${CONFIG.ANYTHINGLLM_API_KEY}`,
@@ -47,8 +50,9 @@ async function createOrGetUser(keycloakUser) {
 
     console.log(`Creating new user: ${keycloakUser.preferred_username || keycloakUser.email}`);
     
+    // FIXED: Use internal URL for API calls
     const createUserResponse = await axios.post(
-      `${CONFIG.ANYTHINGLLM_URL}/api/v1/admin/users/new`,
+      `${CONFIG.ANYTHINGLLM_INTERNAL_URL}/api/v1/admin/users/new`,
       {
         username: keycloakUser.preferred_username || keycloakUser.email,
         password: crypto.randomBytes(16).toString('hex'),
@@ -72,6 +76,7 @@ async function createOrGetUser(keycloakUser) {
 
 app.get('/sso/login', (req, res) => {
   const state = generateState();
+  // FIXED: Use the correct bridge URL for callbacks
   const redirectUri = `${CONFIG.BRIDGE_URL}/sso/callback`;
   
   authStates.set(state, {
@@ -79,6 +84,7 @@ app.get('/sso/login', (req, res) => {
     redirectTo: req.query.redirectTo || '/'
   });
 
+  // Clean up old states (older than 10 minutes)
   for (const [key, value] of authStates.entries()) {
     if (Date.now() - value.timestamp > 10 * 60 * 1000) {
       authStates.delete(key);
@@ -93,6 +99,7 @@ app.get('/sso/login', (req, res) => {
     `&state=${state}`;
 
   console.log(`Initiating SSO login with state: ${state}`);
+  console.log(`Redirect URI: ${redirectUri}`);
   res.redirect(keycloakAuthUrl);
 });
 
@@ -116,6 +123,7 @@ app.get('/sso/callback', async (req, res) => {
   authStates.delete(state);
 
   try {
+    // Exchange code for token
     const tokenResponse = await axios.post(
       `${CONFIG.KEYCLOAK_URL}/realms/${CONFIG.KEYCLOAK_REALM}/protocol/openid-connect/token`,
       new URLSearchParams({
@@ -123,6 +131,7 @@ app.get('/sso/callback', async (req, res) => {
         client_id: CONFIG.KEYCLOAK_CLIENT_ID,
         client_secret: CONFIG.KEYCLOAK_CLIENT_SECRET,
         code: code,
+        // FIXED: Use correct bridge URL for redirect_uri
         redirect_uri: `${CONFIG.BRIDGE_URL}/sso/callback`
       }),
       {
@@ -134,6 +143,7 @@ app.get('/sso/callback', async (req, res) => {
 
     const { access_token } = tokenResponse.data;
 
+    // Get user info
     const userInfoResponse = await axios.get(
       `${CONFIG.KEYCLOAK_URL}/realms/${CONFIG.KEYCLOAK_REALM}/protocol/openid-connect/userinfo`,
       {
@@ -146,12 +156,14 @@ app.get('/sso/callback', async (req, res) => {
     const keycloakUser = userInfoResponse.data;
     console.log(`Authenticated user: ${keycloakUser.preferred_username || keycloakUser.email}`);
 
+    // Create or get user in AnythingLLM
     const anythingLLMUser = await createOrGetUser(keycloakUser);
     
-    // Generate token and redirect immediately to minimize expiration risk
+    // Generate auth token and redirect immediately to minimize expiration risk
     console.log(`Generating auth token for user ${anythingLLMUser.id}...`);
+    // FIXED: Use internal URL for API calls
     const authToken = await axios.get(
-      `${CONFIG.ANYTHINGLLM_URL}/api/v1/users/${anythingLLMUser.id}/issue-auth-token`,
+      `${CONFIG.ANYTHINGLLM_INTERNAL_URL}/api/v1/users/${anythingLLMUser.id}/issue-auth-token`,
       {
         headers: {
           'Authorization': `Bearer ${CONFIG.ANYTHINGLLM_API_KEY}`,
@@ -160,11 +172,11 @@ app.get('/sso/callback', async (req, res) => {
       }
     );
 
-    // Redirect immediately using internal IP endpoint that works
+    // Redirect to external URL so users see proper domain
     const ssoUrl = `${CONFIG.ANYTHINGLLM_URL}/sso/simple?token=${authToken.data.token}`;
     
     console.log(`SSO completed successfully for user: ${anythingLLMUser.username} (ID: ${anythingLLMUser.id})`);
-    console.log(`Redirecting immediately to: ${ssoUrl}`);
+    console.log(`Redirecting to: ${ssoUrl}`);
     
     res.redirect(ssoUrl);
 
@@ -188,7 +200,8 @@ app.listen(CONFIG.PORT, () => {
   console.log(`📍 Login URL: ${CONFIG.BRIDGE_URL}/sso/login`);
   console.log(`🔑 Keycloak: ${CONFIG.KEYCLOAK_URL}/realms/${CONFIG.KEYCLOAK_REALM}`);
   console.log(`🤖 AnythingLLM: ${CONFIG.ANYTHINGLLM_URL}`);
-  console.log(`⚡ Using internal IP for SSO to minimize token expiration`);
+  console.log(`⚡ Using internal URL for API calls, external URL for user redirects`);
+  console.log(`🔧 Bridge URL: ${CONFIG.BRIDGE_URL}`);
 });
 
 process.on('SIGTERM', () => {

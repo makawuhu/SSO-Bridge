@@ -161,7 +161,7 @@ app.get('/sso/callback', async (req, res) => {
     );
 
     // Redirect immediately using internal IP endpoint that works
-    const ssoUrl = `${CONFIG.ANYTHINGLLM_INTERNAL_URL}/sso/simple?token=${authToken.data.token}`;
+    const ssoUrl = `${CONFIG.ANYTHINGLLM_URL}/sso/simple?token=${authToken.data.token}`;
     
     console.log(`SSO completed successfully for user: ${anythingLLMUser.username} (ID: ${anythingLLMUser.id})`);
     console.log(`Redirecting immediately to: ${ssoUrl}`);

@@ -23,22 +23,28 @@ app.use(express.json());
 
 ```javascript
 const CONFIG = {
-  KEYCLOAK_URL: 'https://keycloak.makawuhu.com',
-  KEYCLOAK_REALM: 'master',
-  KEYCLOAK_CLIENT_ID: 'anythingllm',
-  KEYCLOAK_CLIENT_SECRET: 'ccFFHCHRYdMjMrNYyuMi1F6DbDzwQxQE',
-  ANYTHINGLLM_URL: 'https://anythingllm.makawuhu.com',
-  ANYTHINGLLM_INTERNAL_URL: 'http://192.168.4.7:3001', // Use internal IP for SSO
-  ANYTHINGLLM_API_KEY: '1CC3Y73-09X42BB-JDX1QWW-JST30WD',
-  BRIDGE_URL: 'https://anythingllm.makawuhu.com',
-  PORT: 3000
+  KEYCLOAK_URL: process.env.KEYCLOAK_URL || 'https://keycloak.makawuhu.com',
+  KEYCLOAK_REALM: process.env.KEYCLOAK_REALM || 'master',
+  KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID || 'anythingllm',
+  KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET || 'ccFFHCHRYdMjMrNYyuMi1F6DbDzwQxQE',
+  ANYTHINGLLM_URL: process.env.ANYTHINGLLM_URL || 'https://anythingllm.makawuhu.com',
+  ANYTHINGLLM_INTERNAL_URL: process.env.ANYTHINGLLM_INTERNAL_URL || 'http://192.168.4.7:3001',
+  ANYTHINGLLM_API_KEY: process.env.ANYTHINGLLM_API_KEY || '1CC3Y73-09X42BB-JDX1QWW-JST30WD',
+  BRIDGE_URL: process.env.BRIDGE_URL || 'https://sso-bridge.makawuhu.com', // Fixed: Uses bridge domain
+  PORT: process.env.PORT || 3000
 };
 ```
 
 **What's happening:**
 - Centralized configuration for all endpoints and credentials
-- `ANYTHINGLLM_INTERNAL_URL`: Uses internal IP for faster container-to-container communication
-- `BRIDGE_URL`: Where this SSO bridge is accessible externally
+- `ANYTHINGLLM_INTERNAL_URL`: Uses internal IP for faster container-to-container API communication
+- `BRIDGE_URL`: **Corrected**: Now properly uses the SSO bridge domain for OAuth callbacks
+- **Environment Variables**: Now supports env vars with fallback defaults
+
+**Key Configuration Changes:**
+- `BRIDGE_URL` corrected to use `sso-bridge.makawuhu.com`
+- All API calls use `ANYTHINGLLM_INTERNAL_URL` for performance
+- User redirects use `ANYTHINGLLM_URL` for clean domain experience
 
 ## 3. State Management
 
@@ -60,9 +66,9 @@ function generateState() {
 ```javascript
 async function createOrGetUser(keycloakUser) {
   try {
-    // First, try to find existing user
+    // First, try to find existing user - USES INTERNAL URL FOR API CALLS
     const usersResponse = await axios.get(
-      `${CONFIG.ANYTHINGLLM_URL}/api/v1/admin/users`,
+      `${CONFIG.ANYTHINGLLM_INTERNAL_URL}/api/v1/admin/users`,
       {
         headers: {
           'Authorization': `Bearer ${CONFIG.ANYTHINGLLM_API_KEY}`,
@@ -82,11 +88,11 @@ async function createOrGetUser(keycloakUser) {
       return existingUser;
     }
 
-    // If no existing user, create a new one
+    // If no existing user, create a new one - USES INTERNAL URL FOR API CALLS
     console.log(`Creating new user: ${keycloakUser.preferred_username || keycloakUser.email}`);
     
     const createUserResponse = await axios.post(
-      `${CONFIG.ANYTHINGLLM_URL}/api/v1/admin/users/new`,
+      `${CONFIG.ANYTHINGLLM_INTERNAL_URL}/api/v1/admin/users/new`,
       {
         username: keycloakUser.preferred_username || keycloakUser.email,
         password: crypto.randomBytes(16).toString('hex'), // Random password (not used)
@@ -110,13 +116,14 @@ async function createOrGetUser(keycloakUser) {
 ```
 
 **What's happening:**
-1. **Fetch all users** from AnythingLLM using admin API
+1. **Fetch all users** from AnythingLLM using admin API (**Uses internal URL**)
 2. **Search for existing user** by username or email
 3. **If found**: Return existing user
-4. **If not found**: Create new user with random password
+4. **If not found**: Create new user with random password (**Uses internal URL**)
 5. **Return the user object** for token generation
 
 **Key Points:**
+- **Updated**: Uses `ANYTHINGLLM_INTERNAL_URL` for all API calls (faster container networking)
 - Uses AnythingLLM's admin API (requires API key)
 - Generates random password (SSO users don't need to know it)
 - Assigns 'default' role to new users
@@ -126,7 +133,7 @@ async function createOrGetUser(keycloakUser) {
 ```javascript
 app.get('/sso/login', (req, res) => {
   const state = generateState();
-  const redirectUri = `${CONFIG.BRIDGE_URL}/sso/callback`;
+  const redirectUri = `${CONFIG.BRIDGE_URL}/sso/callback`; // Uses corrected bridge URL
   
   // Store state with timestamp and redirect info
   authStates.set(state, {
@@ -163,10 +170,12 @@ app.get('/sso/login', (req, res) => {
 
 **OAuth2 Parameters:**
 - `client_id`: Identifies this application to Keycloak
-- `redirect_uri`: Where Keycloak sends user after auth
+- `redirect_uri`: **Updated**: Now correctly uses `BRIDGE_URL` for callback
 - `response_type=code`: OAuth2 authorization code flow
 - `scope`: What user info we want (OpenID, profile, email)
 - `state`: CSRF protection token
+
+**Important Note**: Due to NPM routing, the callback actually reaches AnythingLLM domain but gets routed to the bridge.
 
 ## 6. Callback Handler (The Main Logic)
 
@@ -213,7 +222,7 @@ app.get('/sso/callback', async (req, res) => {
         client_id: CONFIG.KEYCLOAK_CLIENT_ID,
         client_secret: CONFIG.KEYCLOAK_CLIENT_SECRET,
         code: code,
-        redirect_uri: `${CONFIG.BRIDGE_URL}/sso/callback`
+        redirect_uri: `${CONFIG.BRIDGE_URL}/sso/callback` // Uses corrected bridge URL
       }),
       {
         headers: {
@@ -228,8 +237,9 @@ app.get('/sso/callback', async (req, res) => {
 **What's happening:**
 1. **POST to Keycloak's token endpoint** with authorization code
 2. **Include client credentials** for authentication
-3. **Get access token** from response
-4. **Uses form-encoded data** (OAuth2 standard)
+3. **Updated**: Uses corrected `BRIDGE_URL` for redirect_uri
+4. **Get access token** from response
+5. **Uses form-encoded data** (OAuth2 standard)
 
 ### Step 6B: Get User Information
 
@@ -262,6 +272,7 @@ app.get('/sso/callback', async (req, res) => {
 **What's happening:**
 - **Calls our helper function** to ensure user exists in AnythingLLM
 - **Returns user object** with AnythingLLM user ID
+- **Uses internal API calls** for performance
 
 ### Step 6D: Generate AnythingLLM Auth Token
 
@@ -269,7 +280,7 @@ app.get('/sso/callback', async (req, res) => {
     // Generate auth token and redirect immediately to minimize expiration risk
     console.log(`Generating auth token for user ${anythingLLMUser.id}...`);
     const authToken = await axios.get(
-      `${CONFIG.ANYTHINGLLM_URL}/api/v1/users/${anythingLLMUser.id}/issue-auth-token`,
+      `${CONFIG.ANYTHINGLLM_INTERNAL_URL}/api/v1/users/${anythingLLMUser.id}/issue-auth-token`,
       {
         headers: {
           'Authorization': `Bearer ${CONFIG.ANYTHINGLLM_API_KEY}`,
@@ -278,20 +289,22 @@ app.get('/sso/callback', async (req, res) => {
       }
     );
 
-    // Redirect immediately using internal IP endpoint that works
-    const ssoUrl = `${CONFIG.ANYTHINGLLM_INTERNAL_URL}/sso/simple?token=${authToken.data.token}`;
+    // Redirect to external URL so users see proper domain
+    const ssoUrl = `${CONFIG.ANYTHINGLLM_URL}/sso/simple?token=${authToken.data.token}`;
     
     console.log(`SSO completed successfully for user: ${anythingLLMUser.username} (ID: ${anythingLLMUser.id})`);
-    console.log(`Redirecting immediately to: ${ssoUrl}`);
+    console.log(`Redirecting to: ${ssoUrl}`);
     
     res.redirect(ssoUrl);
 ```
 
 **What's happening:**
-1. **Request auth token** from AnythingLLM for the user
+1. **Request auth token** from AnythingLLM for the user (**Uses internal URL**)
 2. **Build SSO URL** with the token
-3. **Use internal URL** for faster, more reliable connection
+3. **Updated**: Uses `ANYTHINGLLM_URL` (external) for user redirect to show proper domain
 4. **Redirect immediately** to minimize token expiration risk
+
+**Key Change**: Now redirects to external URL so users land on the clean domain, not IP address.
 
 ### Step 6E: Error Handling
 
@@ -325,7 +338,7 @@ app.listen(CONFIG.PORT, () => {
   console.log(`📍 Login URL: ${CONFIG.BRIDGE_URL}/sso/login`);
   console.log(`🔑 Keycloak: ${CONFIG.KEYCLOAK_URL}/realms/${CONFIG.KEYCLOAK_REALM}`);
   console.log(`🤖 AnythingLLM: ${CONFIG.ANYTHINGLLM_URL}`);
-  console.log(`⚡ Using internal IP for SSO to minimize token expiration`);
+  console.log(`⚡ Using internal URL for API calls, external URL for user redirects`);
 });
 
 process.on('SIGTERM', () => {
@@ -337,7 +350,7 @@ process.on('SIGTERM', () => {
 **What's happening:**
 1. **Health endpoint** for monitoring
 2. **Start server** on configured port
-3. **Log startup info** for debugging
+3. **Log startup info** for debugging (**Updated**: Shows corrected URLs)
 4. **Handle graceful shutdown** on SIGTERM
 
 ## Complete Flow Summary
@@ -345,12 +358,23 @@ process.on('SIGTERM', () => {
 1. **User clicks login** → `/sso/login`
 2. **Generate state** → Store in memory
 3. **Redirect to Keycloak** → User authenticates
-4. **Keycloak redirects back** → `/sso/callback` with code
+4. **Keycloak redirects back** → `/sso/callback` with code (**Routes through NPM to AnythingLLM domain**)
 5. **Validate state** → CSRF protection
 6. **Exchange code for token** → OAuth2 flow
 7. **Get user info** → From Keycloak
-8. **Create/find user** → In AnythingLLM
-9. **Generate auth token** → AnythingLLM token
-10. **Redirect with token** → User logged into AnythingLLM
+8. **Create/find user** → In AnythingLLM (**Using internal API calls**)
+9. **Generate auth token** → AnythingLLM token (**Using internal API calls**)
+10. **Redirect with token** → User logged into AnythingLLM (**Using external URL for clean domain experience**)
+
+## Key Architectural Decisions
+
+**Internal vs External URLs:**
+- **Internal URLs**: Used for API calls between containers (faster, more reliable)
+- **External URLs**: Used for user redirects (clean domain experience)
+
+**NPM Integration:**
+- NPM routes `/sso/` calls to the bridge (port 3002)
+- NPM routes `/sso/simple` calls to AnythingLLM (port 3001)
+- This allows the callback to use AnythingLLM domain while reaching the bridge
 
 The beauty of this design is that it handles all the OAuth2 complexity while providing a seamless experience for users who just see a single login flow!

@@ -10,12 +10,12 @@ const CONFIG = {
   KEYCLOAK_URL: process.env.KEYCLOAK_URL || 'https://keycloak.makawuhu.com',
   KEYCLOAK_REALM: process.env.KEYCLOAK_REALM || 'master',
   KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID || 'anythingllm',
-  KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET || 'ccFFHCHRYdMjMrNYyuMi1F6DbDzwQxQE',
-  ANYTHINGLLM_URL: process.env.ANYTHINGLLM_URL || 'https://anythingllm.makawuhu.com',
-  ANYTHINGLLM_INTERNAL_URL: process.env.ANYTHINGLLM_INTERNAL_URL || 'http://192.168.4.7:3001',
-  ANYTHINGLLM_API_KEY: process.env.ANYTHINGLLM_API_KEY || '1CC3Y73-09X42BB-JDX1QWW-JST30WD',
+  KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET || 'your client secret',
+  ANYTHINGLLM_URL: process.env.ANYTHINGLLM_URL || 'your anythingllm url',
+  ANYTHINGLLM_INTERNAL_URL: process.env.ANYTHINGLLM_INTERNAL_URL || 'your local IP',
+  ANYTHINGLLM_API_KEY: process.env.ANYTHINGLLM_API_KEY || 'Your AnythingLLM API key',
   // FIXED: Bridge URL should be the SSO bridge domain, not AnythingLLM domain
-  BRIDGE_URL: process.env.BRIDGE_URL || 'https://sso-bridge.makawuhu.com',
+  BRIDGE_URL: process.env.BRIDGE_URL || 'your bridge url',
   PORT: process.env.PORT || 3000
 };
 

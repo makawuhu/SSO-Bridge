@@ -11,8 +11,8 @@ This bridge implements an OAuth2/OpenID Connect flow:
 3. Keycloak authenticates against Active Directory
 4. Keycloak returns to SSO Bridge with auth code
 5. SSO Bridge exchanges code for user info
-6. SSO Bridge creates/finds user in AnythingLLM
-7. SSO Bridge generates AnythingLLM auth token
+6. SSO Bridge creates/finds user in AnythingLLM (using internal API)
+7. SSO Bridge generates AnythingLLM auth token (using internal API)
 8. User is logged into AnythingLLM
 
 ## Features
@@ -20,10 +20,12 @@ This bridge implements an OAuth2/OpenID Connect flow:
 - ✅ OAuth2/OpenID Connect compliant
 - ✅ Automatic user provisioning in AnythingLLM
 - ✅ CSRF protection with state validation
-- ✅ Token expiration optimization
+- ✅ Internal API optimization for fast performance
+- ✅ Full environment variable configuration support
 - ✅ Container-ready with Docker support
 - ✅ Health check endpoints
 - ✅ Active Directory federation through Keycloak
+- ✅ NPM reverse proxy compatible
 
 ## Prerequisites
 
@@ -42,18 +44,15 @@ git clone https://github.com/makawuhu/SSO-Bridge.git
 cd SSO-Bridge
 ```
 
-### 2. Configure environment variables
+### 2. Build the Docker image
 
 ```bash
-cp .env.example .env
-# Edit .env with your configuration
+docker build -t sso-bridge:latest .
 ```
 
-### 3. Deploy with Docker Compose
+### 3. Deploy with Docker Compose/Stack
 
-```bash
-docker-compose up -d
-```
+Use the configuration below in your Portainer stack or docker-compose.yml.
 
 ## Configuration
 
@@ -69,9 +68,10 @@ docker-compose up -d
 | `ANYTHINGLLM_INTERNAL_URL` | Internal AnythingLLM URL for API calls | `http://192.168.4.7:3001` |
 | `ANYTHINGLLM_API_KEY` | AnythingLLM API key | `your-api-key` |
 | `BRIDGE_URL` | SSO bridge external URL | `https://sso-bridge.example.com` |
-| `PORT` | Bridge service port | `3000` |
+| `NODE_ENV` | Node environment | `production` |
+| `TZ` | Timezone | `America/Los_Angeles` |
 
-### Docker Compose Example
+### Docker Stack Configuration (Portainer)
 
 ```yaml
 version: '3.8'
@@ -93,7 +93,7 @@ services:
       - DISABLE_TELEMETRY=true
       - JWT_SECRET=your-jwt-secret-key-here
     networks:
-      - sso_network
+      - media_network
 
   sso-bridge:
     image: sso-bridge:latest
@@ -103,18 +103,25 @@ services:
     ports:
       - "3002:3000"
     environment:
+      # System Configuration
       - NODE_ENV=production
       - TZ=America/Los_Angeles
-      - KEYCLOAK_URL=https://your-keycloak-url.com
+      
+      # SSO Bridge Configuration
+      - BRIDGE_URL=https://sso-bridge.makawuhu.com
+      
+      # AnythingLLM Configuration
+      - ANYTHINGLLM_URL=https://anythingllm.makawuhu.com
+      - ANYTHINGLLM_INTERNAL_URL=http://192.168.4.7:3001
+      - ANYTHINGLLM_API_KEY=your-api-key-here
+      
+      # Keycloak Configuration
+      - KEYCLOAK_URL=https://keycloak.makawuhu.com
       - KEYCLOAK_REALM=master
       - KEYCLOAK_CLIENT_ID=anythingllm
-      - KEYCLOAK_CLIENT_SECRET=your-client-secret
-      - ANYTHINGLLM_URL=https://your-anythingllm-url.com
-      - ANYTHINGLLM_INTERNAL_URL=http://192.168.4.7:3001
-      - ANYTHINGLLM_API_KEY=your-api-key
-      - BRIDGE_URL=https://your-bridge-url.com
+      - KEYCLOAK_CLIENT_SECRET=your-client-secret-here
     networks:
-      - sso_network
+      - media_network
     depends_on:
       - anythingllm
     healthcheck:
@@ -128,7 +135,7 @@ volumes:
   anythingllm_logs:
 
 networks:
-  sso_network:
+  media_network:
     driver: bridge
 ```
 
@@ -144,27 +151,26 @@ Create a new client in your Keycloak realm:
 
 ### 2. Configure Redirect URIs
 
-Set **Valid Redirect URIs** to:
+Set **Valid Redirect URIs** to support both domains (required for NPM routing):
 ```
-https://your-anythingllm-url.com/sso/callback
+https://anythingllm.example.com/sso/callback
+https://sso-bridge.example.com/sso/callback
 ```
 
-**Important**: Use your AnythingLLM domain, not the bridge domain, for the callback URL.
+### 3. Set Web Origins
 
-### 3. Set Client Scopes
+Add both domains to **Web origins**:
+```
+https://anythingllm.example.com
+https://sso-bridge.example.com
+```
+
+### 4. Set Client Scopes
 
 Enable these scopes:
 - `openid` (required)
 - `profile` (required)
 - `email` (required)
-
-### 4. Web Origins
-
-Add both domains to **Web origins**:
-```
-https://your-anythingllm-url.com
-https://your-bridge-url.com
-```
 
 ## Nginx Proxy Manager Configuration
 
@@ -221,7 +227,7 @@ location /sso/simple {
 
 Users can initiate SSO login by visiting:
 ```
-https://your-bridge-url.com/sso/login
+https://sso-bridge.example.com/sso/login
 ```
 
 Or configure AnythingLLM to redirect to this URL for authentication.
@@ -230,7 +236,7 @@ Or configure AnythingLLM to redirect to this URL for authentication.
 
 The bridge provides a health check endpoint:
 ```bash
-curl https://your-bridge-url.com/health
+curl https://sso-bridge.example.com/health
 ```
 
 Response:
@@ -243,6 +249,22 @@ Response:
 }
 ```
 
+## Performance Features
+
+### Internal API Optimization
+- **User Management**: Uses `ANYTHINGLLM_INTERNAL_URL` for direct container-to-container API calls
+- **Token Generation**: Fast internal networking eliminates proxy overhead
+- **Result**: Super fast SSO authentication flow
+
+### Network Architecture
+```
+User Browser ←→ NPM ←→ SSO Bridge ←→ Keycloak
+                ↓
+    SSO Bridge ←→ AnythingLLM (internal API calls)
+                ↓
+    User Browser ←→ NPM ←→ AnythingLLM (final redirect)
+```
+
 ## Monitoring
 
 Monitor bridge logs for authentication events:
@@ -250,12 +272,22 @@ Monitor bridge logs for authentication events:
 docker logs sso-bridge -f
 ```
 
+Expected startup messages:
+```
+🔐 Keycloak → AnythingLLM SSO Bridge running on port 3000
+📍 Login URL: https://sso-bridge.example.com/sso/login
+🔑 Keycloak: https://keycloak.example.com/realms/master
+🤖 AnythingLLM: https://anythingllm.example.com
+⚡ Using internal URL for API calls, external URL for user redirects
+🔧 Bridge URL: https://sso-bridge.example.com
+```
+
 ## Security Features
 
 - **State Parameter**: CSRF protection with cryptographically secure random states
-- **Token Expiration**: Optimized flow to minimize token expiration issues
-- **Environment Variables**: Sensitive configuration moved to environment variables
-- **Internal Communication**: Uses container networking for secure internal API calls
+- **Internal API Communication**: Uses container networking for secure internal API calls
+- **Environment Variables**: All sensitive configuration via environment variables
+- **Token Optimization**: Minimizes token expiration risk with fast internal API calls
 
 ## Active Directory Integration
 
@@ -281,44 +313,66 @@ This bridge works seamlessly with Keycloak's Active Directory federation:
 
 ### Common Issues
 
-#### Token Expiration
-- Ensure `ANYTHINGLLM_INTERNAL_URL` uses direct IP/container networking
-- Check that AnythingLLM is accessible from the bridge container
+#### "Invalid parameter: redirect_uri" Error
+- **Cause**: Keycloak client missing correct redirect URIs
+- **Fix**: Add both domains to Keycloak client Valid Redirect URIs:
+  - `https://anythingllm.example.com/sso/callback`
+  - `https://sso-bridge.example.com/sso/callback`
 
 #### Authentication Fails
 - Verify Keycloak client configuration
-- Check redirect URI matches exactly: `https://your-anythingllm-url.com/sso/callback`
-- Validate client secret
+- Check that client secret matches environment variable
+- Ensure both domains are in Web Origins
 
 #### User Creation Errors
-- Confirm AnythingLLM API key is valid
-- Check API key permissions for user management
+- Confirm AnythingLLM API key is valid and has admin permissions
+- Check that `ANYTHINGLLM_INTERNAL_URL` is accessible from bridge container
 
-#### "Cannot GET /sso/simple" Error
-- Verify NPM custom nginx configuration is applied
-- Check that `/sso/simple` routes to AnythingLLM (port 3001)
-
-#### "Invalid parameter: redirect_uri" Error
-- Ensure Keycloak client has correct redirect URI
-- Check that callback URL uses AnythingLLM domain, not bridge domain
+#### Slow Performance
+- Verify `ANYTHINGLLM_INTERNAL_URL` uses direct IP/container networking
+- Check container networking connectivity
 
 ### Debug Logging
 
-Enable debug logging:
+View container logs for detailed debugging:
 ```bash
-docker run -e NODE_ENV=development sso-bridge:latest
+docker logs sso-bridge -f
 ```
 
-### Network Connectivity
+### Network Connectivity Tests
 
-Test connectivity between services:
+Test internal API connectivity:
 ```bash
 # From SSO-Bridge container
 curl http://192.168.4.7:3001/health
 
-# From external
+# External health checks
 curl https://anythingllm.example.com/health
 curl https://sso-bridge.example.com/health
+```
+
+## Development
+
+### Local Development Setup
+```bash
+# Clone repository
+git clone https://github.com/makawuhu/SSO-Bridge.git
+cd SSO-Bridge
+
+# Copy environment template
+cp .env.example .env
+# Edit .env with your configuration
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+### Building Docker Image
+```bash
+docker build -t sso-bridge:latest .
 ```
 
 ## Contributing
